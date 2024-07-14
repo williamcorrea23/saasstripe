@@ -1,0 +1,44 @@
+[
+    {
+        "title": "Free",
+        "popular": false,
+        "priceId": "",
+        "currency": "$",
+        "price": 0,
+        "frequency": "Mensal",
+        "description": [
+            "10 users included",
+            "2 GB of storage",
+            "Help center access",
+            "Email support"
+        ]
+    },
+    {
+        "title": "Plano Treineiro",
+        "popular": true,
+        "priceId": "prod_QSXdaODLiJU66u",
+        "currency": "$",
+        "price": 10,
+        "frequency": "mensal",
+        "description": [
+            "20 users included",
+            "10 GB of storage",
+            "Help center access",
+            "Priority email support"
+        ]
+    },
+    {
+        "title": "Plano Futuro Bicho",
+        "popular": false,
+        "priceId": "price_3...",
+        "currency": "$",
+        "price": 5,
+        "frequency": "day",
+        "description": [
+            "50 users included",
+            "30 GB of storage",
+            "Help center access",
+            "Phone & email support"
+        ]
+    }
+]
