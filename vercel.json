@@ -2,8 +2,11 @@
   "version": 2,
   "builds": [
     {
-      "src": "src/lib/**/*",
-      "use": "@vercel/node"
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
     }
   ],
   "routes": [
@@ -11,6 +14,5 @@
       "src": "/(.*)",
       "dest": "/dist/$1"
     }
-  ],
-  "outputDirectory": "dist"
+  ]
 }
