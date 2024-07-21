@@ -1,9 +1,16 @@
 {
+  "version": 2,
   "builds": [
     {
-      "src": "next.config.js",
-      "use": "@vercel/next"
+      "src": "src/lib/**/*",
+      "use": "@vercel/node"
     }
   ],
-  "outputDirectory": "build"
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/dist/$1"
+    }
+  ],
+  "outputDirectory": "dist"
 }
