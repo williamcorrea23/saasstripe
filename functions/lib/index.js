@@ -1,7 +1,4 @@
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-
-module.exports = function(config){
+module.exports = function({config, admin, functions}){
 
     /**
      * Get Firestore document by the given document path.
@@ -27,34 +24,51 @@ module.exports = function(config){
      * @param {string} paymentMethodId (optional)
      * @returns {string} Stripe customer ID
      */
-    const getStripeCustomerId = (userId, name, email, paymentMethodId) => {
+    const getStripeCustomerId = (userId, name, email, paymentMethodId, billingDetails) => {
         const stripe = require('stripe')(config.stripe.secret_api_key);
         let user = null;
         let stripeCustomerId = '';
         return getDoc('users/'+userId).then(userDoc => {
             user = userDoc;
-            if(userDoc.data().stripeCustomerId){
-                return {
-                    existing: true,
-                    id: userDoc.data().stripeCustomerId
+            let data = {
+                name: name,
+                email: email                 
+            }
+            if(billingDetails){
+                data.address = {
+                    line1: billingDetails.address.line1,
+                    line2: billingDetails.address.line2,
+                    city: billingDetails.address.city,
+                    postal_code: billingDetails.address.postal_code,
+                    state: billingDetails.address.state,
+                    country: billingDetails.address.country
                 }
+                data.description="Contact: "+data.name;
+                data.metadata = {
+                    contact_name: data.name,
+                    firebase_uid: userId
+                }
+                data.name = billingDetails.name; // business name replaces user name
+            }
+            if(userDoc.data().stripeCustomerId){
+                // update stripe customer
+                return stripe.customers.update(userDoc.data().stripeCustomerId, data);
             }else{
                 // create stripe customer
-                return stripe.customers.create({
-                    name: name,
-                    email: email,
-                    description: userId
-                });
+                if(paymentMethodId){
+                    data.payment_method = paymentMethodId
+                }
+                return stripe.customers.create(data);
             }
         }).then(customer => {
             stripeCustomerId = customer.id;
-            if(customer.existing){
-                return user;
-            }else{
-                return user.ref.set({
-                    stripeCustomerId: customer.id
-                },{merge: true});
+            let updateUserData = {
+                stripeCustomerId: customer.id
             }
+            if(billingDetails){
+                updateUserData.billingDetails = billingDetails
+            }
+            return user.ref.set(updateUserData, {merge: true});
         }).then(res => {
             if(paymentMethodId){
                 return stripe.paymentMethods.attach(paymentMethodId, {
@@ -65,8 +79,8 @@ module.exports = function(config){
                     customer: stripeCustomerId
                 }
             }
-        }).then(paymentMethod => {
-            return paymentMethod.customer;
+        }).then(res => {
+            return stripeCustomerId;
         });
     }
 
@@ -209,21 +223,30 @@ module.exports = function(config){
         createSubscription: functions.https.onCall((data, context) => {
             const stripe = require('stripe')(config.stripe.secret_api_key);
             const paymentMethodId = data.paymentMethodId || null;
-            let selectedPlan = (config.plans.find(obj => obj.priceId === data.priceId) || {});
+            const billingDetails = data.billingDetails || null;
+            let selectedPlan = (config.plans.find(obj => obj.id === data.planId) || {});
+            if(selectedPlan.legacy){
+                throw new functions.https.HttpsError('internal', "The plan is not available.");
+            }
             return getStripeCustomerId(
                 context.auth.uid,
                 context.auth.token.name,
                 context.auth.token.email,
-                paymentMethodId
+                paymentMethodId,
+                billingDetails
             ).then(stripeCustomerId => {
                 // create subscription
+                const items = [];
+                for (const index in selectedPlan.priceIds){
+                    items.push({
+                        price: selectedPlan.priceIds[index]
+                    });
+                }
                 const data = {
                     customer: stripeCustomerId,
-                    items: [
-                        {price: selectedPlan.priceId}
-                    ]
+                    items: items
                 }
-                if(selectedPlan.price > 0){
+                if(selectedPlan.free === false){
                     data.default_payment_method = paymentMethodId;
                 }
                 return stripe.subscriptions.create(data);
@@ -235,11 +258,25 @@ module.exports = function(config){
                     permissions[p] = [];
                     permissions[p].push(context.auth.uid);
                 }
+                // get items from the subscription and their price IDs
+                let items = {};
+                for(const index in subscription.items.data){
+                    const item = subscription.items.data[index];
+                    if(item.price && item.price.id){
+                        if(selectedPlan.priceIds.indexOf(item.price.id) === -1){
+                            throw new Error("Invalid price ID in a subscription item.");
+                        }else{
+                            items[item.price.id] = item.id;
+                        }
+                    }else{
+                        throw new Error("Missing price ID in a subscription item.");
+                    }
+                }
                 const sub = {
                     plan: selectedPlan.title, // title of the plan
-                    stripePriceId: selectedPlan.priceId, // price ID in stripe
+                    stripeItems: items, // price ID in stripe
                     paymentCycle: selectedPlan.frequency,
-                    price: selectedPlan.price,
+                    planId: selectedPlan.id, // plan ID
                     currency: selectedPlan.currency,
                     stripeSubscriptionId: subscription.id,
                     subscriptionStatus: subscription.status,
@@ -272,7 +309,7 @@ module.exports = function(config){
             let permissions = [];
             return getDoc("subscriptions/"+data.subscriptionId).then(subRef => {
                 // check if the user is an admin level user
-                if(subRef.data().permissions[getAdminPermission()].indexOf(context.auth.uid) !== -1){
+                if(subRef.data().ownerId === context.auth.uid || subRef.data().permissions[getAdminPermission()].indexOf(context.auth.uid) !== -1){
                     const userList = subRef.data().permissions[getDefaultPermission()];
                     permissions = subRef.data().permissions;
                     // get total
@@ -328,7 +365,7 @@ module.exports = function(config){
             return getDoc("subscriptions/"+data.subscriptionId).then(subRef => {
                 // check if the user is an admin level user
                 subDoc = subRef;
-                if(subRef.data().permissions[getAdminPermission()].indexOf(context.auth.uid) !== -1){
+                if(subRef.data().ownerId === context.auth.uid || subRef.data().permissions[getAdminPermission()].indexOf(context.auth.uid) !== -1){
                     return getUserByEmail(data.email);
                 }else{
                     throw new Error("Permission denied.");
@@ -357,20 +394,24 @@ module.exports = function(config){
             }).then((invite) => {
                 inviteId = invite.id;
                 if(config.mailgun){
-                    const mailgun = require("mailgun-js");
-                    const mg = mailgun({apiKey: config.mailgun.api_key, domain: config.mailgun.domain});
+                    const formData = require('form-data');
+                    const Mailgun = require('mailgun.js');
+                    const mailgun = new Mailgun(formData);
+                    const mg = mailgun.client({username: 'api', key: config.mailgun.api_key});
                     const mailData = {
                         from: config.mailgun.from,
                         to: data.email,
                         subject: data.displayName+", you are invited to "+config.site_name,
                         template: config.mailgun.templates.invite_email,
-                        'v:sender': context.auth.token.name,
-                        'v:site_name': config.site_name,
-                        'v:name': data.displayName,
-                        'v:sign_in_url': config.sign_in_url,
-                        'v:sign_up_url': config.sign_up_url
+                        'h:X-Mailgun-Variables': JSON.stringify({
+                            'sender': context.auth.token.name,
+                            'site_name': config.site_name,
+                            'name': data.displayName,
+                            'sign_in_url': config.sign_in_url,
+                            'sign_up_url': config.sign_up_url
+                        })
                     }
-                    return mg.messages().send(mailData);
+                    return mg.messages.create(config.mailgun.domain, mailData);
                 }else{
                     // skip invite email
                     return {}
@@ -387,7 +428,7 @@ module.exports = function(config){
         revokeInvite: functions.https.onCall((data, context) => {
             return Promise.all([getDoc("subscriptions/"+data.subscriptionId), getDoc("invites/"+data.inviteId)]).then(([subRef, inviteRef]) => {
                 // check if the user is an admin level user
-                if(subRef.data().permissions[getAdminPermission()].indexOf(context.auth.uid) !== -1 && inviteRef.data().subscriptionId === subRef.id){
+                if((subRef.data().ownerId === context.auth.uid || subRef.data().permissions[getAdminPermission()].indexOf(context.auth.uid) !== -1) && inviteRef.data().subscriptionId === subRef.id){
                     return admin.firestore().doc("invites/"+data.inviteId).delete();
                 }else{
                     throw new Error("Permission denied.");
@@ -430,6 +471,7 @@ module.exports = function(config){
         updateSubscriptionPaymentMethod: functions.https.onCall((data, context) => {
             const stripe = require('stripe')(config.stripe.secret_api_key);
             const paymentMethodId = data.paymentMethodId || null;
+            const billingDetails = data.billingDetails || null;
             let stripeSubscriptionId = "";
             return getDoc("subscriptions/"+data.subscriptionId).then(subRef => {
                 // check if the user is an admin level user
@@ -439,7 +481,8 @@ module.exports = function(config){
                         context.auth.uid,
                         context.auth.token.name,
                         context.auth.token.email,
-                        paymentMethodId
+                        paymentMethodId,
+                        billingDetails
                     );
                 }else{
                     throw new Error("Permission denied.");
@@ -503,47 +546,92 @@ module.exports = function(config){
         changeSubscriptionPlan: functions.https.onCall((data, context) => {
             const stripe = require('stripe')(config.stripe.secret_api_key);
             const paymentMethodId = data.paymentMethodId || null;
-            let selectedPlan = (config.plans.find(obj => obj.priceId === data.priceId) || {});
+            const billingDetails = data.billingDetails || null;
+            let selectedPlan = (config.plans.find(obj => obj.id === data.planId) || {});
+            if(selectedPlan.legacy){
+                throw new functions.https.HttpsError('internal', "The plan is not available.");
+            }
             let stripeSubscriptionId = '';
+            let addedItems = {};
+            const deleteItemIds = [];
             return getDoc("subscriptions/"+data.subscriptionId).then(subRef => {
                 // check if the user is an admin level user
                 if(subRef.data().ownerId === context.auth.uid){
                     stripeSubscriptionId = subRef.data().stripeSubscriptionId;
+                    for(const priceId in subRef.data().stripeItems){
+                        deleteItemIds.push(subRef.data().stripeItems[priceId]);
+                    }
                     return getStripeCustomerId(
                         context.auth.uid,
                         context.auth.token.name,
                         context.auth.token.email,
-                        paymentMethodId
+                        paymentMethodId,
+                        billingDetails
                     );
                 }else{
                     throw new Error("Permission denied.");
                 }
             }).then(() => {
-                return stripe.subscriptions.retrieve(stripeSubscriptionId);
-            }).then((sub) => {
+                // add new subscription items
+                const items = [];
+                for (const index in selectedPlan.priceIds){
+                    items.push({
+                        price: selectedPlan.priceIds[index]
+                    });
+                }
                 const data = {
                     cancel_at_period_end: false,
                     proration_behavior: 'create_prorations',
-                    items: [{
-                        id: sub.items.data[0].id,
-                        price: selectedPlan.priceId
-                    }]
+                    items: items
                 }
-                if(selectedPlan.price > 0){
+                if(selectedPlan.free === false){
                     data.default_payment_method = paymentMethodId;
                 }
                 return stripe.subscriptions.update(
                     stripeSubscriptionId,
                     data
                 )
+            }).then((subscription) => {
+                // cancel all the existing subscription items
+                const deleteItems = []
+                for(const index in subscription.items.data){
+                    const item = subscription.items.data[index];
+                    if(deleteItemIds.indexOf(item.id) === -1){
+                        // newly added item
+                        if(item.price && item.price.id){
+                            if(selectedPlan.priceIds.indexOf(item.price.id) === -1){
+                                throw new Error("Invalid price ID in a subscription item.");
+                            }else{
+                                addedItems[item.price.id] = item.id;
+                            }
+                        }else{
+                            throw new Error("Missing price ID in a subscription item.");
+                        }
+                    }else{
+                        // existing item to be deleted
+                        let setting = {
+                            proration_behavior: "always_invoice"
+                        }
+                        if(item.price.recurring && item.price.recurring.usage_type === 'metered'){
+                            setting["clear_usage"] = true;
+                        }
+                        deleteItems.push(stripe.subscriptionItems.del(item.id, setting));
+                    }
+                }
+                if(deleteItems.length > 0){
+                    return Promise.all(deleteItems);
+                }else{
+                    return {}
+                }
             }).then(() => {
-                return admin.firestore().doc("subscriptions/"+data.subscriptionId).set({
+                return admin.firestore().doc("subscriptions/"+data.subscriptionId).update({
                     plan: selectedPlan.title, // title of the plan
-                    stripePriceId: selectedPlan.priceId, // price ID in stripe
+                    planId: selectedPlan.id,
+                    stripeItems: addedItems, // price ID in stripe
                     paymentCycle: selectedPlan.frequency,
                     price: selectedPlan.price,
                     currency: selectedPlan.currency,
-                }, {merge: true});
+                });
             }).then(() => {
                 return {
                     result: 'success'
@@ -551,6 +639,22 @@ module.exports = function(config){
             }).catch(err => {
                 throw new functions.https.HttpsError('internal', err.message);
             });
+        }),
+
+        changeBillingDetails: functions.https.onCall((data, context) => {
+            return getStripeCustomerId(
+                context.auth.uid,
+                context.auth.token.name,
+                context.auth.token.email,
+                null,
+                data.billingDetails
+            ).then(res => {
+                return {
+                    result: 'success'
+                }
+            }).catch(err => {
+                throw new functions.https.HttpsError('internal', err.message);
+            })
         }),
 
         stripeWebHook: functions.https.onRequest((req, res) => {
