@@ -1,0 +1,73 @@
+{
+    "brand": "My Brand",
+    "site_name": "My SaaS App",
+    "site_url": "https://saasstripe-git-master-williamcorrea23s-projects.vercel.app/",
+    "sign_in_url": "https://saasstripe-git-master-williamcorrea23s-projects.vercel.app/sign-in",
+    "sign_up_url": "https://saasstripe-git-master-williamcorrea23s-projects.vercel.app/sign-up",
+    "stripe": {
+        "secret_api_key": "sk_test_...",
+        "end_point_secret": "whsec_..."
+    },
+    "plans": [
+        {
+            "title": "Free",
+            "popular": false,
+            "priceId": "price_1...",
+            "currency": "$",
+            "price": 0,
+            "frequency": "week",
+            "description": [
+                "10 users included",
+                "2 GB of storage",
+                "Help center access",
+                "Email support"
+            ]
+        },
+        {
+            "title": "Weekly",
+            "popular": true,
+            "priceId": "price_2...",
+            "currency": "$",
+            "price": 10,
+            "frequency": "week",
+            "description": [
+                "20 users included",
+                "10 GB of storage",
+                "Help center access",
+                "Priority email support"
+            ]
+        },
+        {
+            "title": "Daily",
+            "popular": false,
+            "priceId": "price_3...",
+            "currency": "$",
+            "price": 5,
+            "frequency": "day",
+            "description": [
+                "50 users included",
+                "30 GB of storage",
+                "Help center access",
+                "Phone & email support"
+            ]
+        }
+    ],
+    "permissions": {
+        "access": {
+            "default": true,
+            "admin": false
+        },
+        "admin": {
+            "default": false,
+            "admin": true
+        }
+    },
+    "mailgun": {
+        "api_key": "...",
+        "domain": "app.mydomain.com",
+        "from": "No Reply <no-reply@app.mydomain.com>",
+        "templates":{
+            "invite_email": "invite"
+        }
+    }
+}
