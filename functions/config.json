@@ -1,9 +1,9 @@
 {
     "brand": "My Brand",
     "site_name": "My SaaS App",
-    "site_url": "https://saasstripe-git-master-williamcorrea23s-projects.vercel.app/",
-    "sign_in_url": "https://saasstripe-git-master-williamcorrea23s-projects.vercel.app/sign-in",
-    "sign_up_url": "https://saasstripe-git-master-williamcorrea23s-projects.vercel.app/sign-up",
+    "site_url": "https://saasstripe.vercel.app/",
+    "sign_in_url": "https://saasstripe.vercel.app/sign-in",
+    "sign_up_url": "https://saasstripe.vercel.app/sign-up",
     "stripe": {
         "secret_api_key": "sk_test_...",
         "end_point_secret": "whsec_..."
